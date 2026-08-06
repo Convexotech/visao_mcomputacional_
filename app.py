@@ -46,7 +46,15 @@ if uploaded_file is not None:
     file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
     image = cv2.imdecode(file_bytes, 1)
 
-    results = model.predict(source=image, device="cpu", conf=0.25, verbose=False)
+    # OTIMIZAÇÃO DE MEMÓRIA: Redimensiona imagens grandes para evitar estouro de RAM
+    max_dim = 1024
+    h, w = image.shape[:2]
+    if max(h, w) > max_dim:
+        scale = max_dim / float(max(h, w))
+        image = cv2.resize(image, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
+
+    # OTIMIZAÇÃO DE MEMÓRIA: Limita a resolução interna do YOLO em 640px
+    results = model.predict(source=image, device="cpu", imgsz=640, conf=0.25, verbose=False)
     
     annotated_img = image.copy()
     max_score = 0.0
@@ -66,7 +74,7 @@ if uploaded_file is not None:
                 x1, y1, x2, y2 = map(int, box.xyxy[0])
                 cv2.rectangle(annotated_img, (x1, y1), (x2, y2), (0, 255, 0), 2)
 
-    # Fallback: Se o YOLO não pegar a caixa perfeita (carro cortado na foto), analisa a imagem inteira
+    # Fallback: Se o YOLO não identificar a silhueta inteira (ex: foto cortada do dano)
     if detected_vehicles == 0 or max_score == 0:
         max_score = calculate_damage_score(image, None)
 
@@ -75,7 +83,7 @@ if uploaded_file is not None:
 
     st.subheader("Resultado da Análise:")
 
-    # Calibração fina dos níveis
+    # Calibração dos níveis de avaria
     if max_score > 3.8:
         st.error("**Status:** BATIDA PT (AVARIA 3)\n\n**Ação:** Encaminhar para Perda Total")
     elif max_score > 2.2:
